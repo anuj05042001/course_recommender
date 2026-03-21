@@ -8,22 +8,21 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 import re
 import string
-import os
 
-# --- 1. NLTK Setup (Optimized for Deployment) ---
+# --- 1. NLTK Setup (Optimized for Cloud) ---
 @st.cache_resource
-def download_nltk_resources():
-    resources = ['punkt', 'stopwords', 'wordnet', 'punkt_tab']
-    for res in resources:
+def download_resources():
+    # Adding 'punkt_tab' as it is required by newer NLTK versions
+    for res in ['punkt', 'punkt_tab', 'stopwords', 'wordnet']:
         nltk.download(res, quiet=True)
 
-download_nltk_resources()
+download_resources()
 
-# Initialize global tools after download
+# Initialize tools once
 STOP_WORDS = set(stopwords.words('english'))
 LEMMATIZER = WordNetLemmatizer()
 
-# --- 2. Sample Data ---
+# --- 2. Dataset ---
 COURSE_DATA = {
     'course_id': [101, 102, 103, 104, 105, 106, 107, 108, 109, 110],
     'title': [
@@ -56,9 +55,9 @@ COURSE_DATA = {
     ]
 }
 
-# --- 3. Preprocessing Logic ---
+# --- 3. Preprocessing ---
 def preprocess_text(text):
-    text = text.lower()
+    text = str(text).lower()
     text = re.sub(f'[{string.punctuation}]', '', text)
     text = re.sub(r'\d+', '', text)
     tokens = nltk.word_tokenize(text)
@@ -66,72 +65,84 @@ def preprocess_text(text):
     tokens = [LEMMATIZER.lemmatize(word) for word in tokens]
     return ' '.join(tokens)
 
-# --- 4. Recommender Engine (Cached) ---
+# --- 4. Recommender Engine ---
 class CourseRecommender:
     def __init__(self, data):
         self.df = pd.DataFrame(data)
         self._prepare_data()
         
     def _prepare_data(self):
-        self.df['combined_features'] = self.df['title'] + ' ' + self.df['description'] + ' ' + self.df['category']
+        # Create a single string of features for the ML model to read
+        self.df['combined_features'] = (
+            self.df['title'] + ' ' + 
+            self.df['description'] + ' ' + 
+            self.df['category']
+        )
         self.df['processed_features'] = self.df['combined_features'].apply(preprocess_text)
-        self.tfidf_vectorizer = TfidfVectorizer(max_features=5000)
-        self.tfidf_matrix = self.tfidf_vectorizer.fit_transform(self.df['processed_features'])
+        self.vectorizer = TfidfVectorizer(max_features=5000)
+        self.tfidf_matrix = self.vectorizer.fit_transform(self.df['processed_features'])
         
-    def recommend_courses(self, input_text, top_n=3):
-        processed_input = preprocess_text(input_text)
-        input_vector = self.tfidf_vectorizer.transform([processed_input])
-        cosine_sim = cosine_similarity(input_vector, self.tfidf_matrix)
-        similar_indices = cosine_sim.argsort()[0][-top_n:][::-1]
-        return self.df.iloc[similar_indices]
+    def get_recommendations(self, query, top_n=3):
+        processed_query = preprocess_text(query)
+        query_vec = self.vectorizer.transform([processed_query])
+        similarity = cosine_similarity(query_vec, self.tfidf_matrix)
+        indices = similarity.argsort()[0][-top_n:][::-1]
+        return self.df.iloc[indices]
 
 @st.cache_resource
-def load_recommender():
+def init_model():
     return CourseRecommender(COURSE_DATA)
 
-# --- 5. Streamlit UI ---
+# --- 5. Main App Function ---
 def main():
-    st.set_page_config(page_title="Course Recommender", page_icon="🎓", layout="wide")
+    # CRITICAL: This MUST be the first Streamlit command
+    st.set_page_config(page_title="Course Finder", page_icon="🎓", layout="wide")
     
-    # Load model once
-    recommender = load_recommender()
+    recommender = init_model()
 
-    # CSS for styling
+    # Custom CSS
     st.markdown("""
         <style>
-        .main { background-color: #f5f7f9; }
+        .stTextArea textarea { font-size: 1.1rem; }
         .course-card {
-            background-color: white; padding: 20px; border-radius: 10px;
-            border-left: 5px solid #2e86c1; margin-bottom: 20px;
-            box-shadow: 2px 2px 10px rgba(0,0,0,0.05);
+            background-color: #ffffff;
+            padding: 20px;
+            border-radius: 10px;
+            border-left: 6px solid #2e86c1;
+            margin-bottom: 15px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
         }
         </style>
     """, unsafe_allow_html=True)
 
-    st.title("🎓 Smart Course Recommender")
-    
-    col1, col2 = st.columns([1, 2])
+    st.title("🎓 AI Course Recommendation System")
+    st.write("Enter your interests below, and our model will find the best courses for you.")
+
+    col1, col2 = st.columns([1, 2], gap="large")
 
     with col1:
-        st.subheader("What do you want to learn?")
-        user_input = st.text_area("Enter keywords (e.g., 'I want to build neural networks')", 
-                                  placeholder="Type here...", height=150)
-        predict_button = st.button("Find Courses", use_container_width=True)
+        st.subheader("Your Interests")
+        user_query = st.text_area(
+            "What do you want to learn?",
+            placeholder="e.g. I want to learn data analysis and visualization using python",
+            height=150
+        )
+        search_btn = st.button("Recommend Courses", use_container_width=True)
 
     with col2:
-        st.subheader("Recommended for You")
-        if predict_button and user_input:
-            results = recommender.recommend_courses(user_input)
+        st.subheader("Top Matches")
+        if search_btn and user_query:
+            results = recommender.get_recommendations(user_query)
             for _, row in results.iterrows():
                 st.markdown(f"""
                 <div class="course-card">
-                    <h3>{row['title']}</h3>
-                    <p><b>Category:</b> {row['category']} | <b>Level:</b> {row['difficulty']}</p>
+                    <h3 style="margin:0;">{row['title']}</h3>
+                    <p style="color:#2e86c1;"><b>{row['category']}</b> | Level: {row['difficulty']}</p>
                     <p>{row['description']}</p>
                 </div>
                 """, unsafe_allow_html=True)
-        else:
-            st.info("Results will appear here after you click 'Find Courses'.")
+        elif not search_btn:
+            st.info("Waiting for your input... Describe your goals in the box on the left.")
 
-if __name__ == "__main__":
-    main()
+    st.divider()
+    with st.expander("See all available courses"):
