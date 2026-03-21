@@ -9,16 +9,16 @@ from sklearn.metrics.pairwise import cosine_similarity
 import re
 import string
 
-# --- 1. NLTK Setup (Optimized for Cloud) ---
+# --- 1. NLTK Setup ---
 @st.cache_resource
 def download_resources():
-    # Adding 'punkt_tab' as it is required by newer NLTK versions
+    # Only download if not already present
     for res in ['punkt', 'punkt_tab', 'stopwords', 'wordnet']:
         nltk.download(res, quiet=True)
 
 download_resources()
 
-# Initialize tools once
+# Initialize tools
 STOP_WORDS = set(stopwords.words('english'))
 LEMMATIZER = WordNetLemmatizer()
 
@@ -72,7 +72,6 @@ class CourseRecommender:
         self._prepare_data()
         
     def _prepare_data(self):
-        # Create a single string of features for the ML model to read
         self.df['combined_features'] = (
             self.df['title'] + ' ' + 
             self.df['description'] + ' ' + 
@@ -95,38 +94,18 @@ def init_model():
 
 # --- 5. Main App Function ---
 def main():
-    # CRITICAL: This MUST be the first Streamlit command
+    # MUST BE FIRST
     st.set_page_config(page_title="Course Finder", page_icon="🎓", layout="wide")
     
     recommender = init_model()
 
-    # Custom CSS
-    st.markdown("""
-        <style>
-        .stTextArea textarea { font-size: 1.1rem; }
-        .course-card {
-            background-color: #ffffff;
-            padding: 20px;
-            border-radius: 10px;
-            border-left: 6px solid #2e86c1;
-            margin-bottom: 15px;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-        }
-        </style>
-    """, unsafe_allow_html=True)
-
     st.title("🎓 AI Course Recommendation System")
-    st.write("Enter your interests below, and our model will find the best courses for you.")
-
+    
     col1, col2 = st.columns([1, 2], gap="large")
 
     with col1:
         st.subheader("Your Interests")
-        user_query = st.text_area(
-            "What do you want to learn?",
-            placeholder="e.g. I want to learn data analysis and visualization using python",
-            height=150
-        )
+        user_query = st.text_area("What do you want to learn?", height=150)
         search_btn = st.button("Recommend Courses", use_container_width=True)
 
     with col2:
@@ -134,15 +113,13 @@ def main():
         if search_btn and user_query:
             results = recommender.get_recommendations(user_query)
             for _, row in results.iterrows():
-                st.markdown(f"""
-                <div class="course-card">
-                    <h3 style="margin:0;">{row['title']}</h3>
-                    <p style="color:#2e86c1;"><b>{row['category']}</b> | Level: {row['difficulty']}</p>
-                    <p>{row['description']}</p>
-                </div>
-                """, unsafe_allow_html=True)
-        elif not search_btn:
-            st.info("Waiting for your input... Describe your goals in the box on the left.")
+                with st.container():
+                    st.write(f"### {row['title']}")
+                    st.caption(f"{row['category']} | Level: {row['difficulty']}")
+                    st.write(row['description'])
+                    st.divider()
+        else:
+            st.info("Results will appear here.")
 
-    st.divider()
-    with st.expander("See all available courses"):
+if __name__ == "__main__":
+    main()
